@@ -1,0 +1,27 @@
+{
+  "name": "minecraft-player-count-discord-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot that shows the player count of a Minecraft-server in playing status",
+  "main": "index.js",
+  "dependencies": {
+    "config-yml": "^0.10.3",
+    "discord.js": "^12.5.3",
+    "json-find": "^2.0.8",
+    "minecraft-server-util": "^3.5.1",
+    "node-schedule": "^2.0.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "MCLP2005",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MCLP2005/Minecraft-Player-Count-Discord-Bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MCLP2005/Minecraft-Player-Count-Discord-Bot/issues"
+  },
+  "homepage": "https://github.com/MCLP2005/Minecraft-Player-Count-Discord-Bot#readme"
+}

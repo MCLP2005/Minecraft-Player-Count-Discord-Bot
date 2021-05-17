@@ -1,0 +1,4 @@
+token: YOUR-BOT-TOKEN
+ip: YOUR.SERVER.IP
+name: "YOUR MINECRAFT SERVER NAME"
+# if you're done with editing this config change file name to "config.yml"
