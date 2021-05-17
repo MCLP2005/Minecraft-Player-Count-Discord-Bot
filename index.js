@@ -15,7 +15,6 @@ client.on('ready', () => {
 const job = schedule.scheduleJob('*/5 * * * * *', function(){
 	util.query(config.ip)
 		.then((response) => {
-			console.log(response);
 			var query = JsonFind(response);
 			let active = `Watching ${query.checkKey('onlinePlayers')} of ${query.checkKey('maxPlayers')} players on ${config.name}`;
 			client.user.setActivity(active, {
