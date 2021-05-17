@@ -13,5 +13,5 @@ if any errors come to life, please write at the issue-tab.
 
 Have fun with the bot! ;D
 
-Kind ŕegards
+Kind regards
 MCLP2005
