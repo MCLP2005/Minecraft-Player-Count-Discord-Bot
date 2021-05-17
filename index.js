@@ -24,9 +24,5 @@ const job = schedule.scheduleJob('*/5 * * * * *', function(){
 		})
 		.catch((error) => {
 			console.error(error);
-			client.user.setActivity("ERROR -> Check config or server query status!", {
-		  	type: "PLAYING",
-		  	name: config.name
-			});
 		});
 });
