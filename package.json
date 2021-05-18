@@ -1,6 +1,6 @@
 {
   "name": "minecraft-player-count-discord-bot",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A Discord bot that shows the player count of a Minecraft-server in playing status",
   "main": "index.js",
   "dependencies": {
