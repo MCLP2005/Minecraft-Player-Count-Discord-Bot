@@ -12,7 +12,7 @@ client.on('ready', () => {
 	console.log(`Logged in as ${client.user.tag}!`);
 });
 
-const job = schedule.scheduleJob('*/5 * * * * *', function(){
+const job = schedule.scheduleJob('*/15 * * * * *', function(){
 	util.status(config.ip)
 		.then((response) => {
 			var query = JsonFind(response);
