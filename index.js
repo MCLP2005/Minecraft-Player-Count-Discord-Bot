@@ -1,16 +1,20 @@
 // Import required modules
-const util = require('minecraft-server-util');
-const discord = require('discord.js');
+const util = require('mc-server-utilities');
 const config = require('config-yml');
 const schedule = require('node-schedule');
 const JsonFind = require('json-find');
+const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
 
-// Create a new Discord client
-const client = new discord.Client();
+// Creating discord client
+const client = new Client({
+  intents: [
+    'GuildPresences'
+  ]
+});
 
 // Log in to Discord using the token from the config file
 client.login(config.token);
-
+console.log(3)
 // Event listener for when the bot is ready
 client.on('ready', () => {
 	// Log a message to the console indicating the bot is logged in
@@ -23,15 +27,17 @@ const job = schedule.scheduleJob('*/15 * * * * *', function(){
 	util.status(config.ip)
 		// If the status request is successful
 		.then((response) => {
+			//console.log(response) // Debugging snippet in case the query response in off.
 			// Use JsonFind to easily access data from the response
 			var query = JsonFind(response);
+			var players = JsonFind(query.checkKey('players'))
 			// Create a string to display the current player count and server name
-			let active = `Watching ${query.checkKey('onlinePlayers')} of ${query.checkKey('maxPlayers')} players on ${config.name}`;
+			let active = `Watching ${players.checkKey('online')} of ${players.checkKey('max')} players on ${config.name}`;
 			// Set the bot's presence using the updated setPresence method
 			client.user.setPresence({
 				activities: [{
 					name: active,
-					type: discord.ActivityType.Playing,
+					type: ActivityType.Custom,
 				}],
 				status: 'online',
 			});

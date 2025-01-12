@@ -7,10 +7,9 @@
     "config-yml": "^0.10.3",
     "discord.js": "^14.16.3",
     "json-find": "^2.0.8",
-    "minecraft-server-util": "^5.4.4",
+    "mc-server-utilities": "^5.4.4",
     "node-schedule": "^2.0.0"
   },
-  "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node ./index.js"
