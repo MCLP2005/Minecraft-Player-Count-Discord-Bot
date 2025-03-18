@@ -1,4 +1,5 @@
-token: YOUR-BOT-TOKEN
-ip: YOUR.SERVER.IP
-name: "YOUR MINECRAFT SERVER NAME"
+token: YOUR-BOT-TOKEN # Enter your discord bot token.
+ip: YOUR.SERVER.IP # Enter the IP address or domain of the server you want to watch. You can also add a port, if the server does not use the default port (25565)
+name: "YOUR MINECRAFT SERVER NAME" # Enter the display name of the server.
+debug: 0 # set to 1 to enable debug output. - Work in progress.
 # if you're done with editing this config change file name to "config.yml"
