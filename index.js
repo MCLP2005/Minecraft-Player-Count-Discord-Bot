@@ -182,7 +182,7 @@ const job = schedule.scheduleJob('*/30 * * * * *', function(){
 				client.user.setPresence({
 					activities: [{
 						name: active,
-						type: ActivityType.Custom,
+						type: ActivityType.Watching,
 					}],
 					status: 'online',
 				});
@@ -204,7 +204,7 @@ const job = schedule.scheduleJob('*/30 * * * * *', function(){
 				client.user.setPresence({
 					activities: [{
 						name: `Unable to connect to ${sanitizeString(config.name)}`,
-						type: ActivityType.Custom,
+						type: ActivityType.Watching,
 					}],
 					status: 'dnd', // Red status to indicate error
 				});
