@@ -5,8 +5,30 @@ const schedule = require('node-schedule');
 const JsonFind = require('json-find');
 const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
 
+// Validate and load configuration
+function validateConfig() {
+  const token = process.env.DISCORD_BOT_TOKEN || config.token;
+  
+  if (!token || typeof token !== 'string' || token.trim() === '') {
+    throw new Error('Discord bot token is required');
+  }
+  
+  if (!config.ip || typeof config.ip !== 'string' || config.ip.trim() === '') {
+    throw new Error('Server IP is required in configuration');
+  }
+  
+  if (!config.name || typeof config.name !== 'string' || config.name.trim() === '') {
+    throw new Error('Server name is required in configuration');
+  }
+  
+  // Sanitize debug flag
+  config.debug = config.debug === 1 || config.debug === '1' ? 1 : 0;
+  
+  return token;
+}
+
 // Load token from environment variable if available, otherwise from config
-const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || config.token;
+const BOT_TOKEN = validateConfig();
 
 // Safely sanitize strings to prevent potential injection
 function sanitizeString(str) {
@@ -23,14 +45,62 @@ function sanitizeString(str) {
   });
 }
 
-// Validate IP address format
+// Validate IP address format with enhanced security checks
 function isValidIpOrDomain(input) {
-  // IPv4 pattern
-  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}(:\d{1,5})?$/;
-  // Domain name pattern
-  const domainPattern = /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d{1,5})?$/;
+  if (!input || typeof input !== 'string') return false;
   
-  return ipv4Pattern.test(input) || domainPattern.test(input);
+  const trimmedInput = input.trim();
+  if (trimmedInput.length === 0 || trimmedInput.length > 253) return false;
+  
+  // Check for dangerous characters
+  if (/[<>"'&\s;|`$(){}[\]\\]/.test(trimmedInput)) return false;
+  
+  // Split into host and port parts
+  const parts = trimmedInput.split(':');
+  if (parts.length > 2) return false;
+  
+  const host = parts[0];
+  const port = parts[1];
+  
+  // Validate port if present
+  if (port !== undefined) {
+    const portNum = parseInt(port, 10);
+    if (isNaN(portNum) || portNum < 1 || portNum > 65535) return false;
+  }
+  
+  // IPv4 pattern with strict validation
+  const ipv4Pattern = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+  const ipv4Match = host.match(ipv4Pattern);
+  if (ipv4Match) {
+    // Validate each octet is 0-255
+    for (let i = 1; i <= 4; i++) {
+      const octet = parseInt(ipv4Match[i], 10);
+      if (octet < 0 || octet > 255) return false;
+    }
+    return true;
+  }
+  
+  // Domain name pattern with stricter validation
+  const domainPattern = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/;
+  if (domainPattern.test(host)) {
+    // Additional checks for domain names
+    const labels = host.split('.');
+    if (labels.length < 2) return false;
+    
+    // Check each label length
+    for (const label of labels) {
+      if (label.length === 0 || label.length > 63) return false;
+      if (label.startsWith('-') || label.endsWith('-')) return false;
+    }
+    
+    // Check TLD is at least 2 characters and only letters
+    const tld = labels[labels.length - 1];
+    if (!/^[a-zA-Z]{2,}$/.test(tld)) return false;
+    
+    return true;
+  }
+  
+  return false;
 }
 
 // Debug function that only logs messages when debug is enabled
@@ -64,28 +134,34 @@ function debugLog(...messages) {
   }
 }
 
-// Process termination handlers
+// Process termination handlers with safe client access
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  // Safe shutdown
-  client.destroy();
+  console.error('Uncaught Exception:', error.message);
+  // Safe shutdown - check if client exists and is ready
+  if (typeof client !== 'undefined' && client && client.readyAt) {
+    client.destroy();
+  }
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('Unhandled Rejection at promise:', reason?.message || reason);
   // Continue running but log the issue
 });
 
 process.on('SIGINT', () => {
   console.log('Received SIGINT. Gracefully shutting down...');
-  client.destroy();
+  if (typeof client !== 'undefined' && client && client.readyAt) {
+    client.destroy();
+  }
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   console.log('Received SIGTERM. Gracefully shutting down...');
-  client.destroy();
+  if (typeof client !== 'undefined' && client && client.readyAt) {
+    client.destroy();
+  }
   process.exit(0);
 });
 
@@ -130,6 +206,41 @@ let failedAttempts = 0;
 const MAX_RETRY_ATTEMPTS = 5;
 const RETRY_COOLDOWN = 60000; // 1 minute in milliseconds
 
+// Rate limiting for Discord presence updates
+let lastPresenceUpdate = 0;
+const PRESENCE_UPDATE_COOLDOWN = 15000; // 15 seconds minimum between updates
+let lastActivityText = '';
+
+function updatePresenceSafely(activityText, status = 'online') {
+  const now = Date.now();
+  
+  // Skip update if same text or too soon
+  if (activityText === lastActivityText || (now - lastPresenceUpdate) < PRESENCE_UPDATE_COOLDOWN) {
+    return;
+  }
+  
+  try {
+    if (!client || !client.user || !client.readyAt) {
+      debugLog('Client not ready, skipping presence update');
+      return;
+    }
+    
+    client.user.setPresence({
+      activities: [{
+        name: activityText,
+        type: ActivityType.Watching,
+      }],
+      status: status,
+    });
+    
+    lastPresenceUpdate = now;
+    lastActivityText = activityText;
+    debugLog('Presence updated successfully');
+  } catch (presenceError) {
+    console.error('Failed to update presence:', presenceError.message);
+  }
+}
+
 // Schedule a job to run every 30 seconds (increased from 15 to reduce polling frequency)
 const job = schedule.scheduleJob('*/30 * * * * *', function(){
 	debugLog('Running scheduled job to update server status');
@@ -143,8 +254,13 @@ const job = schedule.scheduleJob('*/30 * * * * *', function(){
 	
 	debugLog('Querying Minecraft server at', serverIp);
 	
+	// Create a timeout promise for the server status request
+	const timeoutPromise = new Promise((_, reject) => {
+		setTimeout(() => reject(new Error('Server status request timeout')), 10000); // 10 second timeout
+	});
+	
 	// Get the status of the Minecraft server using the IP address from the config file
-	util.status(serverIp)
+	Promise.race([util.status(serverIp), timeoutPromise])
 		// If the status request is successful
 		.then((response) => {
 			// Reset failed attempts counter on success
@@ -174,22 +290,16 @@ const job = schedule.scheduleJob('*/30 * * * * *', function(){
 			
 			// Create a string to display the current player count and server name with sanitized inputs
 			const sanitizedServerName = sanitizeString(config.name);
-			let active = `Watching ${onlinePlayers} of ${maxPlayers} players on ${sanitizedServerName}`;
+			
+			// Validate player counts are numbers
+			const validOnline = Number.isInteger(onlinePlayers) && onlinePlayers >= 0 ? onlinePlayers : 0;
+			const validMax = Number.isInteger(maxPlayers) && maxPlayers >= 0 ? maxPlayers : 0;
+			
+			let active = `Watching ${validOnline} of ${validMax} players on ${sanitizedServerName}`;
 			debugLog('Setting presence to:', active);
 			
-			// Set the bot's presence using the updated setPresence method
-			try {
-				client.user.setPresence({
-					activities: [{
-						name: active,
-						type: ActivityType.Watching,
-					}],
-					status: 'online',
-				});
-				debugLog('Presence updated successfully');
-			} catch (presenceError) {
-				console.error('Failed to update presence:', presenceError.message);
-			}
+			// Use the safe presence update function
+			updatePresenceSafely(active, 'online');
 		})
 		.catch((error) => {
 			// Increment failed attempts for rate limiting
@@ -199,18 +309,9 @@ const job = schedule.scheduleJob('*/30 * * * * *', function(){
 			console.error(`Error getting server status (attempt ${failedAttempts}/${MAX_RETRY_ATTEMPTS}):`, error.message);
 			debugLog('Error occurred while getting server status:', error.message);
 			
-			// Set presence to show error state
-			try {
-				client.user.setPresence({
-					activities: [{
-						name: `Unable to connect to ${sanitizeString(config.name)}`,
-						type: ActivityType.Watching,
-					}],
-					status: 'dnd', // Red status to indicate error
-				});
-			} catch (presenceError) {
-				console.error('Failed to update error presence:', presenceError.message);
-			}
+			// Set presence to show error state using safe function
+			const errorMessage = `Unable to connect to ${sanitizeString(config.name)}`;
+			updatePresenceSafely(errorMessage, 'dnd');
 			
 			// If too many failed attempts, pause the job temporarily
 			if (failedAttempts >= MAX_RETRY_ATTEMPTS) {
