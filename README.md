@@ -13,10 +13,21 @@ Then for executing the bot simply type in `npm start` and hit enter.
 
 
 ## Feature list:
+### V1
 * [x] List player count
 * [x] Display a custom name for the server
 * [x] Debug output
 * [x] Use custom refresh interval (via refresh-interval in config, seconds)
+
+### V2
+* [ ] Add support for multiple minecraft servers using an command to be executed by a discord server admin (manage server permission on the senders end).
+    * This should act as a per server option for a discord server to manage.
+    * This will act as a mode set in the config file. The other config parts will stay for a demo of the app
+    * This should work using a mariadb database. This should automatically be created when setting up for the first time.
+* [ ] Add a command for getting a minecraft server's player count on demand
+    * the answer should be sent only to the asking user. Other users shouldn't be able to see the message.
+### V3
+* [ ] Add sharding support
 
 
 
