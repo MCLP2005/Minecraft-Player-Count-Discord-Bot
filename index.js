@@ -1,7 +1,6 @@
 // Import required modules
 const util = require('mc-server-utilities');
 const config = require('config-yml');
-const schedule = require('node-schedule');
 const JsonFind = require('json-find');
 const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
 
@@ -23,7 +22,19 @@ function validateConfig() {
   
   // Sanitize debug flag
   config.debug = config.debug === 1 || config.debug === '1' ? 1 : 0;
-  
+
+  // Sanitize refresh interval (seconds)
+  const defaultInterval = 30;
+  if (config['refresh-interval'] !== undefined) {
+    const intervalSec = parseInt(config['refresh-interval'], 10);
+    if (isNaN(intervalSec) || intervalSec <= 0) {
+      throw new Error('refresh-interval must be a positive integer (seconds)');
+    }
+    config.refreshInterval = intervalSec;
+  } else {
+    config.refreshInterval = defaultInterval;
+  }
+
   return token;
 }
 
@@ -199,6 +210,9 @@ client.on('ready', () => {
 		username: client.user.username,
 		guildsCount: client.guilds.cache.size // Only log count, not detailed information
 	});
+	
+	// Start periodic presence updates once the bot is ready
+	scheduleUpdates();
 });
 
 // Track failed attempts to implement rate limiting
@@ -210,12 +224,14 @@ const RETRY_COOLDOWN = 60000; // 1 minute in milliseconds
 let lastPresenceUpdate = 0;
 const PRESENCE_UPDATE_COOLDOWN = 15000; // 15 seconds minimum between updates
 let lastActivityText = '';
+const PRESENCE_REFRESH_THRESHOLD = 45000; // 45 seconds before refreshing same presence to avoid disappearance
 
 function updatePresenceSafely(activityText, status = 'online') {
   const now = Date.now();
   
-  // Skip update if same text or too soon
-  if (activityText === lastActivityText || (now - lastPresenceUpdate) < PRESENCE_UPDATE_COOLDOWN) {
+  // Skip update if too soon or same activity until refresh threshold
+  if ((now - lastPresenceUpdate) < PRESENCE_UPDATE_COOLDOWN ||
+      (activityText === lastActivityText && (now - lastPresenceUpdate) < PRESENCE_REFRESH_THRESHOLD)) {
     return;
   }
   
@@ -241,89 +257,74 @@ function updatePresenceSafely(activityText, status = 'online') {
   }
 }
 
-// Schedule a job to run every 30 seconds (increased from 15 to reduce polling frequency)
-const job = schedule.scheduleJob('*/30 * * * * *', function(){
-	debugLog('Running scheduled job to update server status');
-	
-	// Validate server IP before using it
-	const serverIp = config.ip;
-	if (!isValidIpOrDomain(serverIp)) {
-		console.error('Invalid server IP or domain format in configuration');
-		return;
-	}
-	
-	debugLog('Querying Minecraft server at', serverIp);
-	
-	// Create a timeout promise for the server status request
-	const timeoutPromise = new Promise((_, reject) => {
-		setTimeout(() => reject(new Error('Server status request timeout')), 10000); // 10 second timeout
-	});
-	
-	// Get the status of the Minecraft server using the IP address from the config file
-	Promise.race([util.status(serverIp), timeoutPromise])
-		// If the status request is successful
-		.then((response) => {
-			// Reset failed attempts counter on success
-			failedAttempts = 0;
-			
-			// Use JsonFind to safely access data from the response
-			const query = JsonFind(response);
-			const players = JsonFind(query.checkKey('players') || {});
-			
-			// Get player counts, defaulting to 0 if data is missing
-			const onlinePlayers = players.checkKey('online') || 0;
-			const maxPlayers = players.checkKey('max') || 0;
-			
-			if (config.debug === 1) {
-				// Only log essential information in debug mode
-				debugLog('Server response received with', onlinePlayers, 'players online');
-				debugLog('Players data:', {
-					online: onlinePlayers,
-					max: maxPlayers,
-					// Don't expose player names in debug logs
-					sampleCount: query.checkKey('players.sample') ? 
-						(Array.isArray(query.checkKey('players.sample')) ? 
-						query.checkKey('players.sample').length : 0) : 
-						'No player sample available'
-				});
-			}
-			
-			// Create a string to display the current player count and server name with sanitized inputs
-			const sanitizedServerName = sanitizeString(config.name);
-			
-			// Validate player counts are numbers
-			const validOnline = Number.isInteger(onlinePlayers) && onlinePlayers >= 0 ? onlinePlayers : 0;
-			const validMax = Number.isInteger(maxPlayers) && maxPlayers >= 0 ? maxPlayers : 0;
-			
-			let active = `Watching ${validOnline} of ${validMax} players on ${sanitizedServerName}`;
-			debugLog('Setting presence to:', active);
-			
-			// Use the safe presence update function
-			updatePresenceSafely(active, 'online');
-		})
-		.catch((error) => {
-			// Increment failed attempts for rate limiting
-			failedAttempts++;
-			
-			// If there is an error, log it to the console with more detailed info
-			console.error(`Error getting server status (attempt ${failedAttempts}/${MAX_RETRY_ATTEMPTS}):`, error.message);
-			debugLog('Error occurred while getting server status:', error.message);
-			
-			// Set presence to show error state using safe function
-			const errorMessage = `Unable to connect to ${sanitizeString(config.name)}`;
-			updatePresenceSafely(errorMessage, 'dnd');
-			
-			// If too many failed attempts, pause the job temporarily
-			if (failedAttempts >= MAX_RETRY_ATTEMPTS) {
-				console.warn(`Too many failed attempts (${failedAttempts}). Pausing updates for ${RETRY_COOLDOWN/1000} seconds.`);
-				job.cancel();
-				
-				// Restart the job after cooldown
-				setTimeout(() => {
-					console.log('Resuming server status updates after cooldown');
-					failedAttempts = 0;
-					job.reschedule('*/30 * * * * *');
-				}, RETRY_COOLDOWN);
-			}
-		});
-});
+// Function to query server status and update Discord presence
+function updateServerStatus() {
+  debugLog('Running scheduled job to update server status');
+
+  // Validate server IP before using it
+  const serverIp = config.ip;
+  if (!isValidIpOrDomain(serverIp)) {
+    console.error('Invalid server IP or domain format in configuration');
+    return;
+  }
+
+  debugLog('Querying Minecraft server at', serverIp);
+
+  // Create a timeout promise for the server status request
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Server status request timeout')), 10000);
+  });
+
+  Promise.race([util.status(serverIp), timeoutPromise])
+    .then((response) => {
+      failedAttempts = 0;
+      const query = JsonFind(response);
+      const players = JsonFind(query.checkKey('players') || {});
+      const onlinePlayers = players.checkKey('online') || 0;
+      const maxPlayers = players.checkKey('max') || 0;
+
+      if (config.debug === 1) {
+        debugLog('Server response received with', onlinePlayers, 'players online');
+        debugLog('Players data:', {
+          online: onlinePlayers,
+          max: maxPlayers,
+          sampleCount: query.checkKey('players.sample') && Array.isArray(query.checkKey('players.sample'))
+            ? query.checkKey('players.sample').length : 'No player sample available'
+        });
+      }
+
+      const sanitizedServerName = sanitizeString(config.name);
+      const validOnline = Number.isInteger(onlinePlayers) && onlinePlayers >= 0 ? onlinePlayers : 0;
+      const validMax = Number.isInteger(maxPlayers) && maxPlayers >= 0 ? maxPlayers : 0;
+      const active = `Watching ${validOnline} of ${validMax} players on ${sanitizedServerName}`;
+      debugLog('Setting presence to:', active);
+      updatePresenceSafely(active, 'online');
+    })
+    .catch((error) => {
+      failedAttempts++;
+      console.error(`Error getting server status (attempt ${failedAttempts}/${MAX_RETRY_ATTEMPTS}):`, error.message);
+      debugLog('Error occurred while getting server status:', error.message);
+
+      const errorMessage = `Unable to connect to ${sanitizeString(config.name)}`;
+      updatePresenceSafely(errorMessage, 'dnd');
+
+      if (failedAttempts >= MAX_RETRY_ATTEMPTS) {
+        console.warn(`Too many failed attempts (${failedAttempts}). Pausing updates for ${RETRY_COOLDOWN/1000} seconds.`);
+        clearInterval(scheduler);
+        setTimeout(() => {
+          console.log('Resuming server status updates after cooldown');
+          failedAttempts = 0;
+          scheduleUpdates();
+        }, RETRY_COOLDOWN);
+      }
+    });
+}
+
+// Scheduler control
+let scheduler = null;
+function scheduleUpdates() {
+  if (scheduler) clearInterval(scheduler);
+  updateServerStatus();
+  scheduler = setInterval(updateServerStatus, config.refreshInterval * 1000);
+}
+

@@ -16,7 +16,7 @@ Then for executing the bot simply type in `npm start` and hit enter.
 * [x] List player count
 * [x] Display a custom name for the server
 * [x] Debug output
-* [ ] Use custom refresh interval
+* [x] Use custom refresh interval (via refresh-interval in config, seconds)
 
 
 
