@@ -20,8 +20,11 @@ function validateConfig() {
     throw new Error('Server name is required in configuration');
   }
   
-  // Sanitize debug flag
-  config.debug = config.debug === 1 || config.debug === '1' ? 1 : 0;
+  // Sanitize debug flag allowing common truthy values
+  const debugValue = config.debug;
+  const debugEnabled = debugValue === 1 || debugValue === true ||
+    (typeof debugValue === 'string' && ['1', 'true', 'yes', 'on'].includes(debugValue.trim().toLowerCase()));
+  config.debug = debugEnabled ? 1 : 0;
 
   // Sanitize refresh interval (seconds)
   const defaultInterval = 30;
@@ -69,9 +72,13 @@ function isValidIpOrDomain(input) {
   // Split into host and port parts
   const parts = trimmedInput.split(':');
   if (parts.length > 2) return false;
-  
+
   const host = parts[0];
   const port = parts[1];
+
+  if (host.toLowerCase() === 'localhost') {
+    return true;
+  }
   
   // Validate port if present
   if (port !== undefined) {
@@ -240,18 +247,30 @@ function updatePresenceSafely(activityText, status = 'online') {
       debugLog('Client not ready, skipping presence update');
       return;
     }
-    
-    client.user.setPresence({
+
+    const presenceOperation = client.user.setPresence({
       activities: [{
         name: activityText,
         type: ActivityType.Watching,
       }],
       status: status,
     });
-    
-    lastPresenceUpdate = now;
-    lastActivityText = activityText;
-    debugLog('Presence updated successfully');
+
+    if (presenceOperation && typeof presenceOperation.then === 'function') {
+      presenceOperation
+        .then(() => {
+          lastPresenceUpdate = now;
+          lastActivityText = activityText;
+          debugLog('Presence updated successfully');
+        })
+        .catch((presenceError) => {
+          console.error('Failed to update presence:', presenceError.message);
+        });
+    } else {
+      lastPresenceUpdate = now;
+      lastActivityText = activityText;
+      debugLog('Presence updated successfully');
+    }
   } catch (presenceError) {
     console.error('Failed to update presence:', presenceError.message);
   }
@@ -270,13 +289,21 @@ function updateServerStatus() {
 
   debugLog('Querying Minecraft server at', serverIp);
 
-  // Create a timeout promise for the server status request
+  const statusPromise = util.status(serverIp);
+  let timeoutId;
   const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error('Server status request timeout')), 10000);
+    timeoutId = setTimeout(() => reject(new Error('Server status request timeout')), 10000);
   });
 
-  Promise.race([util.status(serverIp), timeoutPromise])
+  Promise.race([statusPromise, timeoutPromise])
     .then((response) => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (!response || typeof response !== 'object') {
+        throw new Error('Server returned an unexpected response');
+      }
       failedAttempts = 0;
       const query = JsonFind(response);
       const players = JsonFind(query.checkKey('players') || {});
@@ -293,24 +320,33 @@ function updateServerStatus() {
         });
       }
 
-      const sanitizedServerName = sanitizeString(config.name);
       const validOnline = Number.isInteger(onlinePlayers) && onlinePlayers >= 0 ? onlinePlayers : 0;
       const validMax = Number.isInteger(maxPlayers) && maxPlayers >= 0 ? maxPlayers : 0;
-      const active = `Watching ${validOnline} of ${validMax} players on ${sanitizedServerName}`;
-      debugLog('Setting presence to:', active);
-      updatePresenceSafely(active, 'online');
+      const sanitizedServerName = sanitizeString(config.name);
+      const basePresence = `Watching ${validOnline} of ${validMax} players on ${sanitizedServerName}`;
+      const activity = basePresence.length > 120 ? `${basePresence.slice(0, 117)}...` : basePresence;
+      debugLog('Setting presence to:', activity);
+      updatePresenceSafely(activity, 'online');
     })
     .catch((error) => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
       failedAttempts++;
       console.error(`Error getting server status (attempt ${failedAttempts}/${MAX_RETRY_ATTEMPTS}):`, error.message);
       debugLog('Error occurred while getting server status:', error.message);
 
-      const errorMessage = `Unable to connect to ${sanitizeString(config.name)}`;
+      const errorBase = `Unable to connect to ${sanitizeString(config.name)}`;
+      const errorMessage = errorBase.length > 120 ? `${errorBase.slice(0, 117)}...` : errorBase;
       updatePresenceSafely(errorMessage, 'dnd');
 
       if (failedAttempts >= MAX_RETRY_ATTEMPTS) {
         console.warn(`Too many failed attempts (${failedAttempts}). Pausing updates for ${RETRY_COOLDOWN/1000} seconds.`);
-        clearInterval(scheduler);
+        if (scheduler) {
+          clearInterval(scheduler);
+          scheduler = null;
+        }
         setTimeout(() => {
           console.log('Resuming server status updates after cooldown');
           failedAttempts = 0;
@@ -323,7 +359,10 @@ function updateServerStatus() {
 // Scheduler control
 let scheduler = null;
 function scheduleUpdates() {
-  if (scheduler) clearInterval(scheduler);
+  if (scheduler) {
+    clearInterval(scheduler);
+    scheduler = null;
+  }
   updateServerStatus();
   scheduler = setInterval(updateServerStatus, config.refreshInterval * 1000);
 }
