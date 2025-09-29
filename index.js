@@ -1,8 +1,34 @@
 // Import required modules
+const fs = require('fs');
+const path = require('path');
+const yaml = require('js-yaml');
 const util = require('mc-server-utilities');
-const config = require('config-yml');
 const JsonFind = require('json-find');
 const { Client, GatewayIntentBits, ActivityType, Events } = require('discord.js');
+
+function loadConfig() {
+  const configPath = path.join(__dirname, 'config.yml');
+  const examplePath = path.join(__dirname, 'config-example.yml');
+
+  let sourcePath = configPath;
+  if (!fs.existsSync(configPath)) {
+    if (!fs.existsSync(examplePath)) {
+      throw new Error('Missing configuration. Provide config.yml or config-example.yml.');
+    }
+    sourcePath = examplePath;
+    console.warn('config.yml not found. Falling back to config-example.yml for defaults.');
+  }
+
+  const fileContents = fs.readFileSync(sourcePath, 'utf8');
+  const parsedConfig = yaml.load(fileContents);
+  if (!parsedConfig || typeof parsedConfig !== 'object') {
+    throw new Error(`Configuration file ${path.basename(sourcePath)} is empty or invalid.`);
+  }
+
+  return { ...parsedConfig };
+}
+
+const config = loadConfig();
 
 // Validate and load configuration
 function validateConfig() {

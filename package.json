@@ -4,7 +4,7 @@
   "description": "A Discord bot that shows the player count of a Minecraft-server in playing status",
   "main": "index.js",
   "dependencies": {
-    "config-yml": "^0.10.3",
+    "js-yaml": "^4.1.0",
     "discord.js": "^14.16.3",
     "json-find": "^2.0.8",
     "mc-server-utilities": "^5.4.4",
