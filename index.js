@@ -2,7 +2,7 @@
 const util = require('mc-server-utilities');
 const config = require('config-yml');
 const JsonFind = require('json-find');
-const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, ActivityType, Events } = require('discord.js');
 
 // Validate and load configuration
 function validateConfig() {
@@ -207,8 +207,8 @@ client.login(BOT_TOKEN).catch(error => {
 	process.exit(1); // Exit if we can't connect to Discord
 });
 
-// Event listener for when the bot is ready
-client.on('ready', () => {
+// Event listener for when the bot is ready (uses renamed clientReady event)
+client.once(Events.ClientReady, () => {
 	// Log a message to the console indicating the bot is logged in
 	console.log(`Logged in as ${client.user.tag}!`);
 	
